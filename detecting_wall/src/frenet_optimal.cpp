@@ -722,15 +722,15 @@ int main(int argc, char** argv)
 
     float yawi = initialFrenet[1];
 
-    float c_speed = 0.1*cos(yawi); //current speed
+    float c_speed = 0.5*cos(yawi); //current speed
     float c_accel = 0.0; //current acceleration
     
-    float c_d_d=0.1*sin(yawi); // current lateral speed
+    float c_d_d=0.5*sin(yawi); // current lateral speed
     float c_d_dd=0; // current lateral acceleration
     
     float s0=0; // current cousrse postiion
     float c_d =initialFrenet[0];
-    pd.publishCmd(0.1, 0);
+    // pd.publishCmd(0.5, 0);
     
     
     r.sleep();
@@ -738,50 +738,44 @@ int main(int argc, char** argv)
     while(ros::ok())
     {
         path_ = frenetOptimalPlanning(pd, s0, c_speed, c_accel, c_d, c_d_d, c_d_dd, ob, curpos.theta);
-
-        for(int i=0; i<path_.v.size(); i++)
+        pd.publishCmd(0.5,0);
+        for(int i=0; i<path_.v.size()-1; i++)
         {
-            pd.publishCmd(path_.v[i], path_.vyaw[i]);
-            s0 = path_.s[i];
-            c_d = path_.d[i];
-            c_d_dd = path_.d_d[i];
-            c_speed=path_.s_d[i]; 
-            c_accel=path_.s_dd[i];
-            curpos.theta = path_.yaw[i];
-            pd.publishWaypoints(path_.x, path_.y);
             r.sleep();
+            pd.publishCmd(path_.v[i+1], path_.vyaw[i+1]);
+            s0 = path_.s[i+1];
+            c_d = path_.d[i+1];
+            c_d_dd = path_.d_d[i+1];
+            c_speed=path_.s_d[i+1]; 
+            c_accel=path_.s_dd[i+1];
+            curpos.theta = path_.yaw[i+1];
+            pd.publishWaypoints(path_.x, path_.y);
+            
         }
         
         
-        
-        // r.sleep();
-        
-        // break;
-        
+        r.sleep();
         pd.publishCmd(0,0);
-        for(int i=0; i<2; i++)
+        for(int i=0; i<4; i++)
         {
-            ros::spinOnce();
             r2.sleep();
+            ros::spinOnce();
+            
         }
         
 
-        pd.publishCmd(0.1,0);
+        
 
         curpos=pd.getCurrentPose();
         frepos=pd.calcPosition(0);
         initialFrenet=pd.getInitalFrenet();
 
-        // for(float i=0.0; i<1.8; i+=0.1)
-        // {
-        //     target_pos.push_back(pd.calcPosition(i));
-        //     culvature.push_back(pd.calCurvature(i));
-        // }
+        
         yawi = initialFrenet[1];
-        c_speed = 0.1*cos(yawi);
+        c_speed = 0.5*cos(yawi);
         c_accel = 0.0;
 
-        c_d_d=0.1*sin(yawi);
+        c_d_d=0.5*sin(yawi);
         c_d_dd=0;
 
         s0=0; // current cousrse postiion
