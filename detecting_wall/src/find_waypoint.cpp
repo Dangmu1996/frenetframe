@@ -183,7 +183,7 @@ public:
     {
         detecting_wall::frenet f;
         f.d = -middle_line_[2];
-        f.yaw = -atan(middle_line_[1]);
+        f.yaw = -atan2(middle_line_[1],1);
         frenet_pub_.publish(f);
     }
 

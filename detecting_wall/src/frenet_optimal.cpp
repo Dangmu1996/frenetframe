@@ -17,6 +17,8 @@
 
 #include "detecting_wall/frenet.h"
 
+#include <utility>
+
 using namespace std;
 
 // cost weights
@@ -49,6 +51,7 @@ struct FrenetPath
     vector<float> v;
     vector<float> ds;
     vector<float> c;
+    bool defalt = false;
 };
 
 class QuinticPolynomial
@@ -319,6 +322,7 @@ public:
         
         current_pos_sub_ = nh_.subscribe("/pose2D", 1 , &PoseDrawer::currentPoseCB, this);
         way_pub_=nh_.advertise<sensor_msgs::PointCloud>("/frenet/waypoints", 1);
+        obstacle_sub_=nh_.subscribe<sensor_msgs::PointCloud>("/front_obstacle", 1, &PoseDrawer::transformObstacleCB, this);
 
         cmd_pub_=nh_.advertise<geometry_msgs::Twist>("/cmd_vel", 10);
     }
@@ -381,6 +385,11 @@ public:
         return current_pose_;
     }
 
+    vector<geometry_msgs::Point32> getObstacle()
+    {
+        return obstacle_list_;
+    }
+
     vector<float> getInitalFrenet()
     {
         vector<float> answer;
@@ -392,6 +401,7 @@ public:
 
 private:
     ros::Subscriber pc_sub_;
+    ros::Subscriber obstacle_sub_;
     ros::Subscriber current_pos_sub_;
     ros::Subscriber frenet_sub_;
 
@@ -403,6 +413,7 @@ private:
     std::string REFERENCE_FRAME = "world";
     
     geometry_msgs::Pose2D current_pose_;
+    vector<geometry_msgs::Point32> obstacle_list_;
     float iyaw, d0;
     
     vector<float> ds_;
@@ -431,6 +442,27 @@ private:
 		}
 		return true;
 
+    }
+
+    void transformObstacleCB(const sensor_msgs::PointCloudConstPtr & pc)
+    {
+        if(!pc->points.empty())
+        {
+            tf::StampedTransform tf_between_frames;
+            getTransform(REFERENCE_FRAME, pc->header.frame_id, tf_between_frames);
+    	    geometry_msgs::TransformStamped tf_between_frames_geo;
+		    tf::transformStampedTFToMsg(tf_between_frames, tf_between_frames_geo);
+            sensor_msgs::PointCloud2 cloud_in2;
+		    sensor_msgs::convertPointCloudToPointCloud2(*pc, cloud_in2); // convert from pointcloud to pointcloud2
+		    sensor_msgs::PointCloud2 cloud_in_transformed;
+		    tf2::doTransform(cloud_in2, cloud_in_transformed, tf_between_frames_geo);
+            sensor_msgs::PointCloud cloud_out;
+		    sensor_msgs::convertPointCloud2ToPointCloud(cloud_in_transformed, cloud_out);
+
+            obstacle_list_.clear();
+
+            obstacle_list_=cloud_out.points;
+        }
     }
 
     void transformPointCloudCB(const sensor_msgs::PointCloud::ConstPtr & pc)
@@ -602,8 +634,39 @@ vector<FrenetPath> calcGlobalPaths(vector<FrenetPath> fplist, PoseDrawer &csp, f
     return answer;
 };
 
+bool checkCollision(FrenetPath fp, vector<geometry_msgs::Point32> obs)
+{
+    bool flag=false;
+    float minimum_dis = 0.45;
+    for(int i=0; i<fp.x.size(); i++)
+    {
+        if(obs.empty())
+        {
+            break;
+        }
+        else
+        {
+            for(auto &j : obs)
+            {
+                if(sqrt(pow(j.x-fp.x[i],2)+pow(j.y-fp.y[i],2))<minimum_dis)
+                {
+                    flag=true;
+                    break;
+                }
+            }
+            if(flag)
+            {
+                break;
+            }
+        }
+        
+    }
 
-vector<FrenetPath> checkPaths(vector<FrenetPath> fplist, vector<geometry_msgs::Pose2D> ob)
+
+    return flag;
+}
+
+vector<FrenetPath> checkPaths(vector<FrenetPath> fplist, vector<geometry_msgs::Point32> ob)
 {
     vector<FrenetPath> ok_path;
     
@@ -624,7 +687,7 @@ vector<FrenetPath> checkPaths(vector<FrenetPath> fplist, vector<geometry_msgs::P
         }
         for(auto &j: i.s_dd)
         {
-            if(abs(j)>1.0) //max_accel(1.0m/ss)
+            if(abs(j)>0.5) //max_accel(1.0m/ss)
             {
                 flag=true;
                 break;
@@ -636,7 +699,7 @@ vector<FrenetPath> checkPaths(vector<FrenetPath> fplist, vector<geometry_msgs::P
         }
         for(auto &j: i.c)
         {
-            if(abs(j)>10.0) //max_curvature(1.0m/s)
+            if(abs(j)>1.0) //max_curvature(1.0m/s)
             {
                 flag=true;
                 break;
@@ -644,6 +707,13 @@ vector<FrenetPath> checkPaths(vector<FrenetPath> fplist, vector<geometry_msgs::P
         }
         if(flag)
         {
+            continue;
+        }
+
+        //check obstacle colloision
+        if(checkCollision(i ,ob))
+        {
+            flag=true;
             continue;
         }
 
@@ -666,21 +736,32 @@ vector<FrenetPath> checkPaths(vector<FrenetPath> fplist, vector<geometry_msgs::P
     return ok_path;
 }
 
-FrenetPath frenetOptimalPlanning(PoseDrawer & csp, float s0, float c_speed, float c_accel, float c_d, float c_d_d, float c_d_dd, vector<geometry_msgs::Pose2D> ob, float y0)
+
+
+FrenetPath frenetOptimalPlanning(PoseDrawer & csp, float s0, float c_speed, float c_accel, float c_d, float c_d_d, float c_d_dd, vector<geometry_msgs::Point32> ob, float y0)
 {
     FrenetPath best_path;
     vector<FrenetPath> fplist = calcFrenetPaths(c_speed, c_accel, c_d, c_d_d, c_d_dd, s0);
     fplist = calcGlobalPaths(fplist, csp, y0);
     fplist = checkPaths(fplist, ob);
-    float min_cost = INFINITY;
-    for(auto & fp : fplist)
+
+    if(fplist.empty())
     {
-        if(min_cost >= fp.cf)
+        best_path.defalt=true;
+    }
+    else
+    {
+        float min_cost = INFINITY;
+        for(auto & fp : fplist)
         {
-            min_cost = fp.cf;
-            best_path = fp;
+            if(min_cost >= fp.cf)
+            {
+                min_cost = fp.cf;
+                best_path = fp;
+            }
         }
     }
+    
     return best_path;
 }
 
@@ -690,36 +771,42 @@ int main(int argc, char** argv)
 {
     ros::init(argc, argv, "point_cloud_to_world_link");
 
-    // cout<<"0"<<endl;
+    
     PoseDrawer pd;
     ros::Rate r(10);
     ros::Rate r2(1);
-    for(int i=0; i<2; i++)
+
+    cout<<"0"<<endl;
+    for(int i=0; i<4; i++)
     {
         ros::spinOnce();
         r2.sleep();
     }
     
+    cout<<"1"<<endl;
     // creating path
-    vector<geometry_msgs::Pose2D> target_pos;
-    vector<float> culvature;
-    for(float i=0.0; i<1.8; i+=0.1)
-    {
-        target_pos.push_back(pd.calcPosition(i));
-        culvature.push_back(pd.calCurvature(i));
-    }
+    // vector<geometry_msgs::Pose2D> target_pos;
+    // vector<float> culvature;
+    // for(float i=0.0; i<1.8; i+=0.1)
+    // {
+    //     target_pos.push_back(pd.calcPosition(i));
+    //     culvature.push_back(pd.calCurvature(i));
+    // }
 
+    cout<<"2"<<endl;
     //obstacle
-    vector<geometry_msgs::Pose2D> ob;
-
+    vector<geometry_msgs::Point32> ob=pd.getObstacle();
+    cout<<"3"<<endl;
     //initial pose
     geometry_msgs::Pose2D curpos;
     geometry_msgs::Pose2D frepos;
     curpos=pd.getCurrentPose();
+    cout<<"4"<<endl;
     frepos=pd.calcPosition(0);
+    cout<<"5"<<endl;
     vector<float> initialFrenet; //0: d, 1: yaw
     initialFrenet=pd.getInitalFrenet();
-
+    cout<<"6"<<endl;
     float yawi = initialFrenet[1];
 
     float c_speed = 0.5*cos(yawi); //current speed
@@ -732,56 +819,121 @@ int main(int argc, char** argv)
     float c_d =initialFrenet[0];
     // pd.publishCmd(0.5, 0);
     
-    
+    cout<<"0"<<endl;
     r.sleep();
     FrenetPath path_;
     while(ros::ok())
     {
         path_ = frenetOptimalPlanning(pd, s0, c_speed, c_accel, c_d, c_d_d, c_d_dd, ob, curpos.theta);
-        pd.publishCmd(0.5,0);
-        for(int i=0; i<path_.v.size()-1; i++)
+        if(path_.defalt)
         {
+            bool is_turning = false;
+            bool turning_flag = true;
+            float start_theta = 0;
+            float object_theta = 0;
+            
+            while(turning_flag)
+            {
+                if(!is_turning)
+                {
+                    is_turning=true;
+                    start_theta=curpos.theta;
+                    if(start_theta<0)
+                    {
+                        object_theta=3.141592+start_theta;
+                    }
+                    else
+                    {
+                        object_theta=-3.141592+start_theta;
+                    }
+                }
+                else
+                {
+                    double refined_gap=0;
+                    double gap=object_theta - curpos.theta;
+                    if(gap>3.141592)
+                        refined_gap=-6.283184+gap;
+                    else if(gap < -3.141592)
+                        refined_gap=6.283184+gap;
+                    else
+                        refined_gap=gap;
+                    
+                    if(abs(refined_gap)<=0.1)
+                    {
+                        is_turning=false;
+                        pd.publishCmd(0, 0);
+                        turning_flag=false;
+                    }
+                    else
+                    {
+                        if(refined_gap>=0)
+                        {
+                            pd.publishCmd(0, 0.15);
+                        }
+                        else
+                        {
+                            pd.publishCmd(0, -0.15);
+                        }
+                    }
+                    
+                }
+
+                ros::spinOnce();
+                curpos=pd.getCurrentPose();
+                r.sleep();
+
+            }
+            
+            for(int i=0; i<2; i++)
+            {
+                r2.sleep();
+                ros::spinOnce();
+            }
+        }
+        else
+        {
+            pd.publishCmd(0.5,0);
+            for(int i=0; i<path_.v.size()-1; i++)
+            {
+                r.sleep();
+                pd.publishCmd(path_.v[i+1], path_.vyaw[i+1]);
+                s0 = path_.s[i+1];
+                c_d = path_.d[i+1];
+                c_d_dd = path_.d_d[i+1];
+                c_speed=path_.s_d[i+1]; 
+                c_accel=path_.s_dd[i+1];
+                curpos.theta = path_.yaw[i+1];
+                pd.publishWaypoints(path_.x, path_.y);
+
+            }
+
             r.sleep();
-            pd.publishCmd(path_.v[i+1], path_.vyaw[i+1]);
-            s0 = path_.s[i+1];
-            c_d = path_.d[i+1];
-            c_d_dd = path_.d_d[i+1];
-            c_speed=path_.s_d[i+1]; 
-            c_accel=path_.s_dd[i+1];
-            curpos.theta = path_.yaw[i+1];
-            pd.publishWaypoints(path_.x, path_.y);
-            
+            pd.publishCmd(0,0);
+            for(int i=0; i<2; i++)
+            {
+                r2.sleep();
+                ros::spinOnce();
+            }
+
+
+            curpos=pd.getCurrentPose();
+            frepos=pd.calcPosition(0);
+            initialFrenet=pd.getInitalFrenet();
+            ob=pd.getObstacle();
+
+            yawi = initialFrenet[1];
+            c_speed = 0.5*cos(yawi);
+            c_accel = 0.0;
+
+            c_d_d=0.5*sin(yawi);
+            c_d_dd=0;
+
+            s0=0; // current cousrse postiion
+            c_d =initialFrenet[0];
+
+            // target_pos.push_back(pd.calcPosition(i));
+            // culvature.push_back(pd.calCurvature(i));
         }
-        
-        
-        r.sleep();
-        pd.publishCmd(0,0);
-        for(int i=0; i<4; i++)
-        {
-            r2.sleep();
-            ros::spinOnce();
-            
-        }
-        
-
-        
-
-        curpos=pd.getCurrentPose();
-        frepos=pd.calcPosition(0);
-        initialFrenet=pd.getInitalFrenet();
-
-        
-        yawi = initialFrenet[1];
-        c_speed = 0.5*cos(yawi);
-        c_accel = 0.0;
-
-        c_d_d=0.5*sin(yawi);
-        c_d_dd=0;
-
-        s0=0; // current cousrse postiion
-        c_d =initialFrenet[0];
-        // target_pos.push_back(pd.calcPosition(i));
-        // culvature.push_back(pd.calCurvature(i));
     }
     
     
