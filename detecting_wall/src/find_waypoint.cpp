@@ -52,8 +52,10 @@ private:
     Eigen::Vector3f middle_line_;
 
     sensor_msgs::PointCloud way_points_;
+    sensor_msgs::PointCloud obstacle_points_;
     ros::Publisher points_pub_;
     ros::Publisher frenet_pub_;
+    ros::Publisher obstacle_pub_;
 
     ros::Rate rate_;
 
@@ -71,6 +73,8 @@ private:
         vector<float> right_y_vec;
         vector<float> left_x_vec;
         vector<float> left_y_vec;
+        geometry_msgs::Point32 pt;
+        obstacle_points_.points.clear();
     
         for(int i=0; i<scan_msg->ranges.size(); i++)
         {
@@ -90,6 +94,14 @@ private:
                 }
                 else
                 {   
+                }
+
+                if(140<= i && i<=582 && sqrt(x_temp*x_temp + y_temp*y_temp) <=1) //1for obstacle range
+                {
+                     pt.x=x_temp;
+                     pt.y=y_temp;
+                     pt.z=0.2;
+                     obstacle_points_.points.push_back(pt);
                 }
             }
         }
@@ -145,7 +157,9 @@ public:
         this->scan_sub_=nh_.subscribe("/projected/scan", 10, &Waypoints::laserCallback, this);
         this->points_pub_=nh_.advertise<sensor_msgs::PointCloud>("/local/waypoints", 10);
         this->frenet_pub_=nh_.advertise<detecting_wall::frenet>("/frenetDY", 10);
+        this->obstacle_pub_=nh_.advertise<sensor_msgs::PointCloud>("/front_obstacle",10);
         way_points_.header.frame_id="velodyne";
+        obstacle_points_.header.frame_id="velodyne";
     }
 
     void publishWaypoints()
@@ -156,7 +170,7 @@ public:
         {
             wp_.x=i;
             wp_.y=i*i*middle_line_[0] + i*middle_line_[1]+middle_line_[2];
-            wp_.z=0;
+            wp_.z=-0.2;
             way_points_.points.push_back(wp_);
         }
 
@@ -172,6 +186,12 @@ public:
         f.yaw = -atan(middle_line_[1]);
         frenet_pub_.publish(f);
     }
+
+    void publishObstacle()
+    {
+        obstacle_points_.header.stamp=ros::Time::now();
+        obstacle_pub_.publish(obstacle_points_);
+    }
 };
 
 int main(int argc, char** argv)
@@ -182,8 +202,9 @@ int main(int argc, char** argv)
     while(ros::ok())
     {
         wp.publishFrenets();
+        wp.publishObstacle();
         wp.publishWaypoints();
-
+        
         ros::spinOnce();
     }
     
