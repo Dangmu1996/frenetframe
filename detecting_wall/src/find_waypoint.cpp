@@ -166,7 +166,7 @@ public:
     {
         way_points_.header.stamp=ros::Time::now();
         geometry_msgs::Point32 wp_;
-        for(float i=0; i<=10; i=i+0.1)
+        for(float i=-0.3; i<=10; i=i+0.1)
         {
             wp_.x=i;
             wp_.y=i*i*middle_line_[0] + i*middle_line_[1]+middle_line_[2];
@@ -182,8 +182,8 @@ public:
     void publishFrenets()
     {
         detecting_wall::frenet f;
-        f.d = -middle_line_[2];
-        f.yaw = -atan2(middle_line_[1],1);
+        f.d = -(0.09*middle_line_[0]-0.3*middle_line_[1] +middle_line_[2]); //offset velodyne and scout -0.3
+        f.yaw = -atan2(-2*middle_line_[0]*0.3+middle_line_[1],1);
         frenet_pub_.publish(f);
     }
 

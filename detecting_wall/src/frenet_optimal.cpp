@@ -350,22 +350,46 @@ public:
         return k;
     }
 
-    void publishWaypoints(vector<float> x, vector<float> y)
+    // void publishWaypoints(vector<float> x, vector<float> y)
+    // {
+    //     // cout<<"4_1"<<endl;
+    //     // cout<<x[0]<<y[0]<<endl;
+        
+    //     sensor_msgs::PointCloud waypoints;
+    //     geometry_msgs::Point32 points;
+    //     waypoints.header.frame_id="world";
+    //     waypoints.header.stamp=ros::Time::now();
+    //     for(int i=0; i<x.size(); i++)
+    //     {
+    //         points.x=x[i];
+    //         points.y=y[i];
+    //         points.z=0;
+    //         waypoints.points.push_back(points);
+    //     }
+    //     way_pub_.publish(waypoints);
+        
+    // }
+    void publishWaypoints(vector<FrenetPath> fplist)
     {
         // cout<<"4_1"<<endl;
         // cout<<x[0]<<y[0]<<endl;
-        
         sensor_msgs::PointCloud waypoints;
         geometry_msgs::Point32 points;
         waypoints.header.frame_id="world";
         waypoints.header.stamp=ros::Time::now();
-        for(int i=0; i<x.size(); i++)
+
+        for(int i=0; i<fplist.size(); i++)
         {
-            points.x=x[i];
-            points.y=y[i];
-            points.z=0;
-            waypoints.points.push_back(points);
+            for(int j=0; j<fplist[i].x.size(); j++)
+            {
+                points.x = fplist[i].x[j];
+                points.y = fplist[i].y[j];
+                points.z = 0;
+                waypoints.points.push_back(points);
+            }
+            
         }
+
         way_pub_.publish(waypoints);
         
     }
@@ -601,6 +625,7 @@ vector<FrenetPath> calcGlobalPaths(vector<FrenetPath> fplist, PoseDrawer &csp, f
             float di = fp.d[j];
             float fx = ipos.x + di*cos(ipos.theta + 1.570796);
             float fy = ipos.y + di*sin(ipos.theta + 1.570796);
+
             fp.x.push_back(fx);
             fp.y.push_back(fy);
         }
@@ -637,7 +662,7 @@ vector<FrenetPath> calcGlobalPaths(vector<FrenetPath> fplist, PoseDrawer &csp, f
 bool checkCollision(FrenetPath fp, vector<geometry_msgs::Point32> obs)
 {
     bool flag=false;
-    float minimum_dis = 0.45;
+    float minimum_dis = 0.6;
     for(int i=0; i<fp.x.size(); i++)
     {
         if(obs.empty())
@@ -673,6 +698,11 @@ vector<FrenetPath> checkPaths(vector<FrenetPath> fplist, vector<geometry_msgs::P
     for(auto &i: fplist)
     {
         bool flag = false;
+        // if(sqrt(i.x.back()*i.x.back()+i.y.back()*i.y.back())>1)//max_distance(10.0m)
+        // {
+        //     continue;
+        // }
+
         for(auto &j: i.s_d)
         {
             if(j>2.0) //max_speed(2.0m/s)
@@ -687,7 +717,7 @@ vector<FrenetPath> checkPaths(vector<FrenetPath> fplist, vector<geometry_msgs::P
         }
         for(auto &j: i.s_dd)
         {
-            if(abs(j)>0.5) //max_accel(1.0m/ss)
+            if(abs(j)>0.2) //max_accel(1.0m/ss)
             {
                 flag=true;
                 break;
@@ -745,6 +775,8 @@ FrenetPath frenetOptimalPlanning(PoseDrawer & csp, float s0, float c_speed, floa
     fplist = calcGlobalPaths(fplist, csp, y0);
     fplist = checkPaths(fplist, ob);
 
+    csp.publishWaypoints(fplist);
+
     if(fplist.empty())
     {
         best_path.defalt=true;
@@ -776,14 +808,14 @@ int main(int argc, char** argv)
     ros::Rate r(10);
     ros::Rate r2(1);
 
-    cout<<"0"<<endl;
+    // cout<<"0"<<endl;
     for(int i=0; i<4; i++)
     {
         ros::spinOnce();
         r2.sleep();
     }
     
-    cout<<"1"<<endl;
+    // cout<<"1"<<endl;
     // creating path
     // vector<geometry_msgs::Pose2D> target_pos;
     // vector<float> culvature;
@@ -793,20 +825,20 @@ int main(int argc, char** argv)
     //     culvature.push_back(pd.calCurvature(i));
     // }
 
-    cout<<"2"<<endl;
+    // cout<<"2"<<endl;
     //obstacle
     vector<geometry_msgs::Point32> ob=pd.getObstacle();
-    cout<<"3"<<endl;
+    // cout<<"3"<<endl;
     //initial pose
     geometry_msgs::Pose2D curpos;
     geometry_msgs::Pose2D frepos;
     curpos=pd.getCurrentPose();
-    cout<<"4"<<endl;
+    // cout<<"4"<<endl;
     frepos=pd.calcPosition(0);
-    cout<<"5"<<endl;
+    // cout<<"5"<<endl;
     vector<float> initialFrenet; //0: d, 1: yaw
     initialFrenet=pd.getInitalFrenet();
-    cout<<"6"<<endl;
+    // cout<<"6"<<endl;
     float yawi = initialFrenet[1];
 
     float c_speed = 0.5*cos(yawi); //current speed
@@ -819,7 +851,7 @@ int main(int argc, char** argv)
     float c_d =initialFrenet[0];
     // pd.publishCmd(0.5, 0);
     
-    cout<<"0"<<endl;
+    // cout<<"0"<<endl;
     r.sleep();
     FrenetPath path_;
     while(ros::ok())
@@ -903,7 +935,7 @@ int main(int argc, char** argv)
                 c_speed=path_.s_d[i+1]; 
                 c_accel=path_.s_dd[i+1];
                 curpos.theta = path_.yaw[i+1];
-                pd.publishWaypoints(path_.x, path_.y);
+                // pd.publishWaypoints(path_.x, path_.y);
 
             }
 
