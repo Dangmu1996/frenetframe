@@ -1,0 +1,6 @@
+<launch>
+    <include file ="$(find pointcloud_to_laserscan)/launch/sample_node.launch"/>
+    <include file ="$(find laser_scan_matcher)/demo/demo.launch"/>
+    <include file ="$(find laser_filters)/examples/box_filter_example.launch"/>
+    <include file ="$(find obstacle_detector)/launch/nodes.launch"/>
+</launch>

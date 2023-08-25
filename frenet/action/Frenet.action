@@ -1,0 +1,6 @@
+#goal define
+bool start
+---
+bool finish
+---
+int32 sequence
